@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Delhi Jeans Manufacturers Map</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      #map {
+        height: 60vh;
+        border-radius: 0.75rem;
+      }
+      #locationList {
+        max-height: 30vh;
+        overflow-y: auto;
+      }
+    </style>
+  </head>
+  <body class="bg-gray-900 text-white min-h-screen flex flex-col">
+    <header class="bg-blue-900 text-white text-center text-2xl font-bold p-4 relative shadow-lg">
+      Delhi Jeans Manufacturers Map
+      <button
+        id="toggleMode"
+        class="absolute right-5 top-1/2 -translate-y-1/2 text-white hover:text-blue-300"
+        title="Toggle Light/Dark Mode"
+      >
+        🌙
+      </button>
+    </header>
+
+    <div
+      id="form-container"
+      class="bg-gray-800 p-4 flex flex-wrap gap-4 justify-center items-center shadow-md"
+    >
+      <input
+        id="locationName"
+        type="text"
+        placeholder="Office Name (e.g. VFS Global)"
+        class="flex-1 min-w-[200px] px-4 py-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-400"
+      />
+      <input
+        id="address"
+        type="text"
+        placeholder="Address (e.g. Shivaji Stadium, Delhi)"
+        class="flex-1 min-w-[200px] px-4 py-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-400"
+      />
+      <button
+        onclick="addLocation()"
+        class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-3 rounded-lg"
+      >
+        Add Location
+      </button>
+    </div>
+
+    <div id="map" class="m-5 shadow-lg"></div>
+
+    <!-- Summary above list -->
+    <div
+      id="locationSummary"
+      class="m-5 rounded-lg shadow-lg bg-gray-800 text-white p-4 font-semibold text-center"
+    >
+      <!-- JS fills this -->
+    </div>
+
+    <!-- Locations list below summary -->
+    <div
+      id="locationList"
+      class="m-5 rounded-lg shadow-lg bg-gray-800 text-white p-4 max-h-[30vh] overflow-y-auto"
+    >
+      <!-- JS will fill this -->
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+      const darkTiles =
+        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
+      const lightTiles = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+
+      let isDarkMode = true;
+      const map = L.map("map").setView([28.6139, 77.209], 12);
+
+      const darkLayer = L.tileLayer(darkTiles, {
+        attribution: "&copy; OpenStreetMap & CartoDB",
+        maxZoom: 20,
+        subdomains: "abcd",
+      });
+      const lightLayer = L.tileLayer(lightTiles, {
+        attribution: "&copy; OpenStreetMap contributors",
+        maxZoom: 20,
+      });
+
+      darkLayer.addTo(map);
+
+      const markers = [];
+
+      window.onload = () => {
+        const saved = JSON.parse(localStorage.getItem("locations") || "[]");
+        saved.forEach((loc, i) => addMarker(loc, i));
+        renderLocationList();
+      };
+
+      async function geocode(address) {
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+            address + ", Delhi"
+          )}`
+        );
+        const data = await response.json();
+        return data.length
+          ? [parseFloat(data[0].lat), parseFloat(data[0].lon)]
+          : null;
+      }
+
+      async function addLocation() {
+        const name = document.getElementById("locationName").value.trim();
+        const address = document.getElementById("address").value.trim();
+        if (!name || !address)
+          return alert("Please enter both name and address.");
+
+        const latlng = await geocode(address);
+        if (!latlng)
+          return alert("Location not found. Please enter a more specific address.");
+
+        const offsetLat = latlng[0] + (Math.random() - 0.5) * 0.0008;
+        const offsetLng = latlng[1] + (Math.random() - 0.5) * 0.0008;
+
+        const locationData = {
+          name,
+          address,
+          lat: offsetLat,
+          lng: offsetLng,
+          visited: false,
+          feedback: "",
+        };
+
+        const allLocations = JSON.parse(localStorage.getItem("locations") || "[]");
+        allLocations.push(locationData);
+        localStorage.setItem("locations", JSON.stringify(allLocations));
+
+        addMarker(locationData, markers.length);
+        renderLocationList();
+
+        document.getElementById("locationName").value = "";
+        document.getElementById("address").value = "";
+      }
+
+      function redIcon() {
+        return new L.Icon({
+          iconUrl: "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
+          iconSize: [32, 32],
+          iconAnchor: [16, 32],
+        });
+      }
+      function greenIcon() {
+        return new L.Icon({
+          iconUrl: "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
+          iconSize: [32, 32],
+          iconAnchor: [16, 32],
+        });
+      }
+
+      function addMarker(data, index) {
+        const marker = L.marker([data.lat, data.lng], {
+          icon: data.visited ? greenIcon() : redIcon(),
+        }).addTo(map);
+        markers[index] = { marker, ...data };
+        updatePopup(index);
+      }
+
+      function updatePopup(index) {
+        const item = markers[index];
+        const marker = item.marker;
+        const feedbackText = item.feedback
+          ? `<br><b>Feedback:</b> <span style="color:#000">${item.feedback}</span>`
+          : "";
+        const visitText = item.visited ? "Mark as Not Visited" : "Mark as Visited";
+
+        marker.bindPopup(`
+          <div style="color:#000; font-weight: normal;">
+            <b>${item.name}</b><br>${item.address}<br>
+          </div>
+          <button onclick="toggleVisited(${index})" 
+            style="margin-top:8px; padding:6px 12px; background-color:#16a34a; color:#fff; border:none; border-radius:4px; cursor:pointer;">
+            ${visitText}
+          </button><br><br>
+          <button onclick="addFeedback(${index})" 
+            style="padding:6px 12px; background-color:#eab308; color:#000000; border:none; border-radius:4px; cursor:pointer;">
+            Add/View Feedback
+          </button>
+          <div style="color:#000; margin-top:6px;">${feedbackText}</div>
+        `).openPopup();
+      }
+
+      function toggleVisited(index) {
+        const item = markers[index];
+        const marker = item.marker;
+        item.visited = !item.visited;
+        marker.setIcon(item.visited ? greenIcon() : redIcon());
+
+        const saved = JSON.parse(localStorage.getItem("locations") || "[]");
+        if (saved[index]) saved[index].visited = item.visited;
+        localStorage.setItem("locations", JSON.stringify(saved));
+        updatePopup(index);
+        renderLocationList();
+      }
+
+      function addFeedback(index) {
+        const item = markers[index];
+        const currentFeedback = item.feedback || "";
+        const feedback = prompt("Apna feedback likho:", currentFeedback);
+        if (feedback !== null) {
+          item.feedback = feedback;
+          const saved = JSON.parse(localStorage.getItem("locations") || "[]");
+          if (saved[index]) saved[index].feedback = feedback;
+          localStorage.setItem("locations", JSON.stringify(saved));
+          updatePopup(index);
+          renderLocationList();
+        }
+      }
+      function deleteLocation(index) {
+  // Remove from map
+  map.removeLayer(markers[index].marker);
+
+  // Remove from markers array
+  markers.splice(index, 1);
+
+  // Remove from localStorage
+  const saved = JSON.parse(localStorage.getItem("locations") || "[]");
+  saved.splice(index, 1);
+  localStorage.setItem("locations", JSON.stringify(saved));
+
+  // Re-render markers and list
+  map.eachLayer((layer) => {
+    if (layer instanceof L.Marker) {
+      map.removeLayer(layer);
+    }
+  });
+
+  markers.length = 0;
+  saved.forEach((loc, i) => addMarker(loc, i));
+  renderLocationList();
+}
+
+
+      function renderLocationList() {
+        const container = document.getElementById("locationList");
+        const summary = document.getElementById("locationSummary");
+        const saved = JSON.parse(localStorage.getItem("locations") || "[]");
+        container.innerHTML = "";
+
+        // Summary counts
+        const total = saved.length;
+        const visitedCount = saved.filter((loc) => loc.visited).length;
+        const notVisitedCount = total - visitedCount;
+
+        summary.innerHTML = `
+          Total location: <span class="text-blue-400">${total}</span> |
+          Visited: <span class="text-green-400">${visitedCount}</span> |
+          Not Visited: <span class="text-red-400">${notVisitedCount}</span>
+        `;
+
+        if (total === 0) {
+          container.innerHTML =
+            "<div class='text-gray-400 text-center'>No locations added yet.</div>";
+          return;
+        }
+
+        saved.forEach((item, index) => {
+          const row = document.createElement("div");
+          row.className =
+            "flex justify-between items-center bg-gray-700 p-3 rounded mb-2 cursor-pointer";
+
+          row.innerHTML = `
+  <div>
+    <div class="font-semibold text-blue-300">${item.name}</div>
+    <div class="text-sm text-gray-300">${item.address}</div>
+    ${
+      item.visited
+        ? `<span class="text-green-400 text-xs">Visited</span>`
+        : `<span class="text-red-400 text-xs">Not Visited</span>`
+    }
+  </div>
+  <div class="flex gap-2">
+    <button onclick="toggleVisited(${index})" 
+      class="text-xs bg-green-600 hover:bg-green-700 px-2 py-1 rounded">Toggle Visit</button>
+    <button onclick="addFeedback(${index})"
+      class="text-xs bg-yellow-500 hover:bg-yellow-600 text-black px-2 py-1 rounded">Feedback</button>
+    <button onclick="deleteLocation(${index})"
+      class="text-xs bg-red-600 hover:bg-red-700 px-2 py-1 rounded">Delete</button>
+  </div>
+`;
+
+
+          row.addEventListener("click", (e) => {
+            if (
+              e.target.tagName.toLowerCase() !== "button" &&
+              e.target.parentElement.tagName.toLowerCase() !== "button"
+            ) {
+              openPopupForIndex(index);
+            }
+          });
+
+          container.appendChild(row);
+        });
+      }
+
+      function openPopupForIndex(index) {
+        const item = markers[index];
+        if (!item) return;
+
+        map.setView([item.lat, item.lng], 16);
+        item.marker.openPopup();
+      }
+
+      document.getElementById("toggleMode").onclick = () => {
+        isDarkMode = !isDarkMode;
+        document.body.classList.toggle("bg-white");
+        document.body.classList.toggle("text-black");
+        document.body.classList.toggle("bg-gray-900");
+        document.body.classList.toggle("text-white");
+        map.removeLayer(isDarkMode ? lightLayer : darkLayer);
+        (isDarkMode ? darkLayer : lightLayer).addTo(map);
+        document.getElementById("toggleMode").textContent = isDarkMode ? "🌙" : "☀️";
+      };
+    </script>
+  </body>
+</html>
